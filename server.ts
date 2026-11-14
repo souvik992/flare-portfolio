@@ -11,111 +11,64 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
-interface AnimateVideoBody {
-  imageBase64?: string;
-  mimeType?: string;
-  prompt?: string;
-  aspectRatio?: string;
+interface ChatRequestBody {
+  message?: string;
+  previousInteractionId?: string;
 }
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '25mb' }));
+  app.use(express.json({ limit: '2mb' }));
 
-  app.post('/api/animate-video', async (req, res) => {
+  app.post('/api/chat', async (req, res) => {
     try {
-      const { imageBase64, mimeType, prompt, aspectRatio } = (req.body || {}) as AnimateVideoBody;
+      const { message, previousInteractionId } = (req.body || {}) as ChatRequestBody;
 
-      if (!imageBase64 || typeof imageBase64 !== 'string') {
-        res.status(400).json({ error: 'Please upload an image before generating a video.' });
+      if (!message || typeof message !== 'string' || !message.trim()) {
+        res.status(400).json({ error: 'Please enter a message to ask Souvik.' });
         return;
       }
-
-      const validMime =
-        typeof mimeType === 'string' && mimeType.startsWith('image/')
-          ? mimeType
-          : 'image/jpeg';
-
-      const selectedRatio: '16:9' | '9:16' = aspectRatio === '9:16' ? '9:16' : '16:9';
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         res.status(500).json({
-          error:
-            'GEMINI_API_KEY is not configured on the server. Add a billing-enabled Gemini API key in Settings > Secrets.',
+          error: 'GEMINI_API_KEY is not configured on the server. Please add it in Settings > Secrets.',
         });
         return;
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-      const motionPrompt =
-        typeof prompt === 'string' && prompt.trim().length > 0
-          ? prompt.trim()
-          : 'Natural subtle typing motion, calm steady hands on keyboard, gentle breathing, and smooth luminous golden and cyan light flares orbiting gracefully around the scene.';
 
-      const interaction = await ai.interactions.create(
-        {
-          model: 'gemini-omni-1.2-flash',
-          input: [
-            {
-              type: 'image',
-              mime_type: validMime,
-              data: cleanBase64,
-            },
-            {
-              type: 'text',
-              text: motionPrompt,
-            },
-          ],
-          background: false,
-          store: false,
-          stream: false,
-          response_format: {
-            type: 'video',
-            aspect_ratio: selectedRatio,
-          },
-        },
-        { timeout: 300000 }
-      );
+      const interaction = await ai.interactions.create({
+        model: 'gemini-4-hydrogen',
+        input: message.trim(),
+        system_instruction:
+          'You are Souvik—a curious, thoughtful engineer, product builder, and designer. Answer visitors clearly, warmly, and concisely in natural conversational prose (2-4 sentences unless more detail is requested).',
+        ...(typeof previousInteractionId === 'string' && previousInteractionId.trim()
+          ? { previous_interaction_id: previousInteractionId.trim() }
+          : {}),
+      });
 
-      const videoPart = interaction.output_video;
-      if (!videoPart) {
-        res.status(502).json({ error: 'Video generation returned no video output.' });
+      const reply = interaction.output_text?.trim();
+      if (!reply) {
+        res.status(502).json({ error: 'No response was generated. Please try again.' });
         return;
       }
 
-      if (videoPart.data) {
-        res.json({
-          videoBase64: videoPart.data,
-          mimeType: videoPart.mime_type || 'video/mp4',
-          aspectRatio: selectedRatio,
-        });
-        return;
-      }
-
-      if (videoPart.uri) {
-        res.json({
-          videoUri: videoPart.uri,
-          mimeType: videoPart.mime_type || 'video/mp4',
-          aspectRatio: selectedRatio,
-        });
-        return;
-      }
-
-      res.status(502).json({ error: 'Generated video did not include playable data or URI.' });
+      res.json({
+        reply,
+        interactionId: interaction.id,
+      });
     } catch (err: unknown) {
       const errorObj = err as { status?: number; message?: string };
       const status = typeof errorObj?.status === 'number' ? errorObj.status : 500;
-      const rawMessage = errorObj?.message || 'Failed to generate video from image.';
+      const rawMessage = errorObj?.message || 'Unable to generate a response right now.';
 
       let friendlyMessage = rawMessage;
-      if (status === 403 || rawMessage.includes('PERMISSION_DENIED')) {
-        friendlyMessage =
-          'Access denied for gemini-omni-1.2-flash. Please configure a billing-enabled GEMINI_API_KEY in Settings > Secrets.';
+      if (status === 403 || rawMessage.includes('PERMISSION_DENIED') || rawMessage.includes('API_KEY_INVALID')) {
+        friendlyMessage = 'Invalid or unauthorized Gemini API key. Please check Settings > Secrets.';
       } else if (status === 429 || rawMessage.includes('RESOURCE_EXHAUSTED')) {
-        friendlyMessage =
-          'Quota exhausted or paid tier required for gemini-omni-1.2-flash. Please select a billing-enabled API key in Settings > Secrets.';
+        friendlyMessage = 'Rate limit reached. Please wait a moment and try again.';
       }
 
       res.status(status >= 400 && status < 600 ? status : 500).json({ error: friendlyMessage });

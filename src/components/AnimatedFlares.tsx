@@ -4,86 +4,40 @@ interface AnimatedFlaresProps {
   imageAspectRatio?: number;
 }
 
-interface OrbitSpec {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-  tilt: number;
-  speed: number;
-  direction: 1 | -1;
-}
-
-interface RibbonStream {
-  orbitIndex: number;
+interface ExpandingStream {
+  phaseOffset: number;
   baseAngle: number;
   arcSpan: number;
-  widthPx: number;
   hue: 'ice' | 'cyan' | 'gold' | 'amber';
-  waveOffset: number;
+  speed: number;
 }
 
-interface SparkParticle {
-  orbitIndex: number;
+interface ExpandingSpark {
+  phaseOffset: number;
   baseAngle: number;
   speedMultiplier: number;
-  radialOffset: number;
-  waveAmp: number;
+  radialJitter: number;
   waveFreq: number;
   phase: number;
-  size: number;
-  streakLen: number;
   hue: 'ice' | 'cyan' | 'gold' | 'amber';
   alpha: number;
 }
 
-// Orbit coordinates match CharacterMotionCanvas (inner ring elevated cleanly above hands)
-const ORBITS: OrbitSpec[] = [
-  {
-    cx: 0.5,
-    cy: 0.695,
-    rx: 0.515,
-    ry: 0.275,
-    tilt: -0.05,
-    speed: 1.15,
-    direction: 1,
-  },
-  {
-    cx: 0.5,
-    cy: 0.635,
-    rx: 0.21,
-    ry: 0.072,
-    tilt: -0.3,
-    speed: 1.65,
-    direction: 1,
-  },
-  {
-    cx: 0.5,
-    cy: 0.665,
-    rx: 0.36,
-    ry: 0.165,
-    tilt: -0.16,
-    speed: 1.35,
-    direction: 1,
-  },
+const CYCLE_RATE = 0.135; // Matches CharacterMotionCanvas 7.4s expansion cycle
+
+const STREAMS: ExpandingStream[] = [
+  { phaseOffset: 0.0, baseAngle: 0.2, arcSpan: 1.45, hue: 'cyan', speed: 1.35 },
+  { phaseOffset: 0.0, baseAngle: 3.34, arcSpan: 1.35, hue: 'gold', speed: 1.35 },
+  { phaseOffset: 0.33, baseAngle: 1.4, arcSpan: 1.4, hue: 'ice', speed: 1.35 },
+  { phaseOffset: 0.33, baseAngle: 4.54, arcSpan: 1.35, hue: 'amber', speed: 1.35 },
+  { phaseOffset: 0.67, baseAngle: 2.3, arcSpan: 1.45, hue: 'gold', speed: 1.35 },
+  { phaseOffset: 0.67, baseAngle: 5.44, arcSpan: 1.3, hue: 'cyan', speed: 1.35 },
 ];
 
-const RIBBON_STREAMS: RibbonStream[] = [
-  { orbitIndex: 0, baseAngle: 0.0, arcSpan: 1.55, widthPx: 5.5, hue: 'cyan', waveOffset: 0.0 },
-  { orbitIndex: 0, baseAngle: 0.08, arcSpan: 1.05, widthPx: 2.6, hue: 'ice', waveOffset: 0.008 },
-  { orbitIndex: 0, baseAngle: 2.65, arcSpan: 1.5, widthPx: 5.5, hue: 'gold', waveOffset: -0.006 },
-  { orbitIndex: 0, baseAngle: 2.75, arcSpan: 0.95, widthPx: 2.4, hue: 'amber', waveOffset: 0.005 },
-  { orbitIndex: 1, baseAngle: 0.8, arcSpan: 1.8, widthPx: 4.5, hue: 'gold', waveOffset: 0.0 },
-  { orbitIndex: 1, baseAngle: 3.94, arcSpan: 1.65, widthPx: 4.2, hue: 'cyan', waveOffset: 0.004 },
-  { orbitIndex: 2, baseAngle: 1.1, arcSpan: 1.4, widthPx: 3.4, hue: 'amber', waveOffset: 0.0 },
-  { orbitIndex: 2, baseAngle: 4.2, arcSpan: 1.25, widthPx: 3.0, hue: 'cyan', waveOffset: -0.005 },
-];
-
-function createSparks(): SparkParticle[] {
-  const sparks: SparkParticle[] = [];
-  const total = 210;
+function createSparks(): ExpandingSpark[] {
+  const sparks: ExpandingSpark[] = [];
+  const total = 180;
   for (let i = 0; i < total; i++) {
-    const orbitIndex = i < 105 ? 0 : i < 165 ? 1 : 2;
     const seed = (i * 9301 + 49297) % 233280;
     const r1 = seed / 233280;
     const r2 = ((seed * 7 + 13) % 233280) / 233280;
@@ -93,15 +47,12 @@ function createSparks(): SparkParticle[] {
       r3 > 0.72 ? 'amber' : r3 > 0.42 ? 'gold' : r3 > 0.16 ? 'cyan' : 'ice';
 
     sparks.push({
-      orbitIndex,
-      baseAngle: r1 * Math.PI * 2,
-      speedMultiplier: 0.65 + r2 * 0.7,
-      radialOffset: (r2 - 0.5) * (orbitIndex === 0 ? 0.055 : orbitIndex === 2 ? 0.042 : 0.028),
-      waveAmp: 0.005 + r3 * 0.011,
-      waveFreq: 1.8 + r1 * 2.8,
-      phase: r2 * Math.PI * 2,
-      size: 0.85 + r3 * 1.9,
-      streakLen: 0.028 + r2 * 0.055,
+      phaseOffset: (i % 3) * 0.33 + r1 * 0.15,
+      baseAngle: r2 * Math.PI * 2,
+      speedMultiplier: 0.8 + r3 * 0.55,
+      radialJitter: (r2 - 0.5) * 0.04,
+      waveFreq: 1.8 + r1 * 2.4,
+      phase: r3 * Math.PI * 2,
       hue: hueChoice,
       alpha: 0.45 + r2 * 0.55,
     });
@@ -111,6 +62,11 @@ function createSparks(): SparkParticle[] {
 
 const SPARKS = createSparks();
 
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 function getColorRgba(hue: 'ice' | 'cyan' | 'gold' | 'amber', alpha: number): string {
   if (hue === 'amber') return `rgba(255, 148, 42, ${alpha})`;
   if (hue === 'gold') return `rgba(255, 208, 92, ${alpha})`;
@@ -118,28 +74,33 @@ function getColorRgba(hue: 'ice' | 'cyan' | 'gold' | 'amber', alpha: number): st
   return `rgba(240, 250, 255, ${alpha})`;
 }
 
-function getDepthVisibility(orbitIndex: number, u: number, v: number, theta: number): number {
-  // Shield hands & keyboard zone from bright overlapping flares
-  const dxH = (u - 0.465) / 0.095;
-  const dyH = (v - 0.79) / 0.055;
-  const handDistSq = dxH * dxH + dyH * dyH;
-  const handShield = Math.min(Math.max((Math.sqrt(handDistSq) - 0.45) / 0.8, 0), 1);
+// Strict 3D depth & face-safe visibility so character is always inside the flare and never cut across the face
+function getVisibility(u: number, v: number, theta: number): number {
+  // Face-safe exclusion ellipse around Souvik's head & face
+  const dxFace = (u - 0.498) / 0.068;
+  const dyFace = (v - 0.498) / 0.105;
+  const faceDist = Math.sqrt(dxFace * dxFace + dyFace * dyFace);
+  const faceSafe = smoothstep(0.78, 1.28, faceDist);
 
+  // Hand/keyboard protection
+  const dxHand = (u - 0.46) / 0.095;
+  const dyHand = (v - 0.79) / 0.055;
+  const handDist = Math.sqrt(dxHand * dxHand + dyHand * dyHand);
+  const handShield = smoothstep(0.45, 1.25, handDist);
+
+  // Back arc (sin(theta) < 0) goes behind character's head & shoulders
   const sinTheta = Math.sin(theta);
-  if (orbitIndex === 1 || orbitIndex === 2) {
-    if (sinTheta < 0.16 && u > 0.42 && u < 0.63 && v > 0.44 && v < 0.85) {
-      const horizFactor = Math.min(Math.abs(u - 0.525) / 0.105, 1);
-      const backDepth = Math.min(Math.max((-sinTheta + 0.16) / 0.35, 0), 1);
-      return (1 - backDepth * (1 - horizFactor * horizFactor) * 0.94) * handShield;
-    }
-    return handShield;
+  if (sinTheta < 0.18) {
+    const dxBody = (u - 0.515) / 0.105;
+    const dyBody = (v - 0.65) / 0.21;
+    const bodyDist = Math.sqrt(dxBody * dxBody + dyBody * dyBody);
+    const bodyOcc = smoothstep(0.5, 1.15, bodyDist);
+    const backFactor = smoothstep(0.18, -0.25, sinTheta);
+    const occ = 1 - backFactor * (1 - bodyOcc);
+    return occ * faceSafe * handShield;
   }
 
-  if (sinTheta < -0.28 && u > 0.44 && u < 0.56 && v > 0.38 && v < 0.55) {
-    const horizFactor = Math.min(Math.abs(u - 0.50) / 0.06, 1);
-    return (0.18 + 0.82 * horizFactor) * handShield;
-  }
-  return handShield;
+  return faceSafe * handShield;
 }
 
 export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
@@ -179,8 +140,8 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(canvas);
 
-    const projectPoint = (
-      orbit: OrbitSpec,
+    const projectExpandingPoint = (
+      grow: number,
       theta: number,
       radialDelta = 0,
       verticalDelta = 0
@@ -201,16 +162,23 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
         offsetX = (width - drawW) / 2;
       }
 
+      // Orbit expands gradually from small/compact around Souvik to wide sweeping workspace halo
+      const rx = 0.24 + (0.54 - 0.24) * grow + radialDelta;
+      const ry = 0.18 + (0.30 - 0.18) * grow + radialDelta * 0.55;
+      const cx = 0.5;
+      const cy = 0.67 + (0.70 - 0.67) * grow;
+      const tilt = -0.18 + (-0.05 - -0.18) * grow;
+
       const cosT = Math.cos(theta);
       const sinT = Math.sin(theta);
-      const lx = (orbit.rx + radialDelta) * cosT;
-      const ly = (orbit.ry + radialDelta * 0.55) * sinT;
+      const lx = rx * cosT;
+      const ly = ry * sinT;
 
-      const cosRot = Math.cos(orbit.tilt);
-      const sinRot = Math.sin(orbit.tilt);
+      const cosRot = Math.cos(tilt);
+      const sinRot = Math.sin(tilt);
 
-      const u = orbit.cx + lx * cosRot - ly * sinRot;
-      const v = orbit.cy + lx * sinRot + ly * cosRot + verticalDelta;
+      const u = cx + lx * cosRot - ly * sinRot;
+      const v = cy + lx * sinRot + ly * cosRot + verticalDelta;
 
       const x = offsetX + u * drawW;
       const y = offsetY + v * drawH;
@@ -225,12 +193,12 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
       hue: 'ice' | 'cyan' | 'gold' | 'amber',
       alpha: number
     ) => {
-      if (alpha <= 0.02 || radius <= 1) return;
+      if (alpha <= 0.02 || radius <= 0.8) return;
 
       const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
       grad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1, alpha)})`);
-      grad.addColorStop(0.2, getColorRgba(hue, alpha * 0.7));
-      grad.addColorStop(0.55, getColorRgba(hue, alpha * 0.2));
+      grad.addColorStop(0.22, getColorRgba(hue, alpha * 0.7));
+      grad.addColorStop(0.58, getColorRgba(hue, alpha * 0.2));
       grad.addColorStop(1, getColorRgba(hue, 0));
 
       ctx.fillStyle = grad;
@@ -238,8 +206,8 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
 
-      const streakW = radius * 3.8;
-      const streakH = Math.max(1.2, radius * 0.08);
+      const streakW = radius * 3.5;
+      const streakH = Math.max(1.0, radius * 0.085);
       const hGrad = ctx.createLinearGradient(x - streakW, y, x + streakW, y);
       hGrad.addColorStop(0, getColorRgba(hue, 0));
       hGrad.addColorStop(0.5, `rgba(255, 255, 255, ${alpha * 0.85})`);
@@ -254,45 +222,46 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
 
     const renderFrame = (now: number) => {
       if (width > 0 && height > 0) {
-        const elapsedSec = prefersReducedMotion ? 0 : (now - startTime) / 1000;
+        const elapsedSec = prefersReducedMotion ? 0.35 / CYCLE_RATE : (now - startTime) / 1000;
 
         ctx.clearRect(0, 0, width, height);
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
 
-        for (const stream of RIBBON_STREAMS) {
-          const orbit = ORBITS[stream.orbitIndex];
-          const headAngle = stream.baseAngle + elapsedSec * orbit.speed * orbit.direction;
-          const steps = 36;
+        // 1. Expanding spiral light ribbons (start small, gradually grow larger as they orbit)
+        for (const stream of STREAMS) {
+          const cycle = (elapsedSec * CYCLE_RATE + stream.phaseOffset) % 1;
+          const grow = smoothstep(0.0, 0.92, cycle);
+          const lifeAlpha = smoothstep(0.0, 0.14, cycle) * (1 - smoothstep(0.74, 1.0, cycle));
 
-          let prevPt = projectPoint(
-            orbit,
-            headAngle - stream.arcSpan * orbit.direction,
-            stream.waveOffset
-          );
+          // Both width and flare crest radius start small and gradually grow bigger
+          const widthBase = 1.4 + 4.8 * grow;
+          const headAngle = stream.baseAngle + elapsedSec * stream.speed;
+          const steps = 34;
+
+          let prevPt = projectExpandingPoint(grow, headAngle - stream.arcSpan);
 
           for (let s = 1; s <= steps; s++) {
-            const frac = s / steps;
-            const segAngle = headAngle - (1 - frac) * stream.arcSpan * orbit.direction;
+            const frac = s / steps; // Tail (0) -> Head (1) grows along arc too
+            const segAngle = headAngle - (1 - frac) * stream.arcSpan;
             const radialRipple =
-              stream.waveOffset +
-              Math.sin(segAngle * 4.0 - elapsedSec * 2.5) * 0.007 * (1 - frac * 0.5);
-            const pt = projectPoint(orbit, segAngle, radialRipple);
+              Math.sin(segAngle * 4.0 - elapsedSec * 2.4) * (0.003 + 0.006 * grow);
+            const pt = projectExpandingPoint(grow, segAngle, radialRipple);
 
-            const depthVis = getDepthVisibility(stream.orbitIndex, pt.u, pt.v, segAngle);
-            const segAlpha = Math.pow(frac, 1.8) * 0.62 * depthVis;
+            const vis = getVisibility(pt.u, pt.v, segAngle) * lifeAlpha;
+            const segAlpha = Math.pow(frac, 1.7) * 0.64 * vis;
 
             if (segAlpha > 0.015) {
               ctx.strokeStyle = getColorRgba(stream.hue, segAlpha);
-              ctx.lineWidth = Math.max(0.8, stream.widthPx * pt.scale * (0.2 + 0.9 * frac));
+              ctx.lineWidth = Math.max(0.6, widthBase * pt.scale * (0.15 + 0.9 * frac));
               ctx.beginPath();
               ctx.moveTo(prevPt.x, prevPt.y);
               ctx.lineTo(pt.x, pt.y);
               ctx.stroke();
 
               if (frac > 0.45) {
-                ctx.strokeStyle = `rgba(255, 252, 245, ${(frac - 0.45) * 0.7 * depthVis})`;
-                ctx.lineWidth = Math.max(0.5, stream.widthPx * 0.35 * pt.scale * frac);
+                ctx.strokeStyle = `rgba(255, 252, 245, ${(frac - 0.45) * 0.72 * vis})`;
+                ctx.lineWidth = Math.max(0.4, widthBase * 0.32 * pt.scale * frac);
                 ctx.beginPath();
                 ctx.moveTo(prevPt.x, prevPt.y);
                 ctx.lineTo(pt.x, pt.y);
@@ -303,38 +272,38 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
             prevPt = pt;
           }
 
-          const headPt = projectPoint(orbit, headAngle, stream.waveOffset);
-          const headVis = getDepthVisibility(stream.orbitIndex, headPt.u, headPt.v, headAngle);
-          drawCrestFlare(
-            headPt.x,
-            headPt.y,
-            stream.widthPx * 4.6 * headPt.scale,
-            stream.hue,
-            0.78 * headVis
-          );
+          const headPt = projectExpandingPoint(grow, headAngle);
+          const headVis = getVisibility(headPt.u, headPt.v, headAngle) * lifeAlpha;
+          const crestRadius = (6 + 22 * grow) * headPt.scale;
+          drawCrestFlare(headPt.x, headPt.y, crestRadius, stream.hue, 0.8 * headVis);
         }
 
+        // 2. Orbiting sparks that start tiny and gradually grow larger as they spiral outward
         for (const p of SPARKS) {
-          const orbit = ORBITS[p.orbitIndex];
-          const theta =
-            p.baseAngle + elapsedSec * orbit.speed * p.speedMultiplier * orbit.direction;
-          const wave = Math.sin(elapsedSec * p.waveFreq + p.phase) * p.waveAmp;
+          const cycle = (elapsedSec * CYCLE_RATE + p.phaseOffset) % 1;
+          const grow = smoothstep(0.0, 0.92, cycle);
+          const lifeAlpha = smoothstep(0.0, 0.16, cycle) * (1 - smoothstep(0.74, 1.0, cycle));
 
-          const headPt = projectPoint(orbit, theta, p.radialOffset, wave);
-          const tailPt = projectPoint(
-            orbit,
-            theta - p.streakLen * orbit.direction,
-            p.radialOffset,
+          const theta = p.baseAngle + elapsedSec * 1.35 * p.speedMultiplier;
+          const wave = Math.sin(elapsedSec * p.waveFreq + p.phase) * (0.003 + 0.008 * grow);
+          const streakLen = 0.012 + 0.048 * grow;
+
+          const headPt = projectExpandingPoint(grow, theta, p.radialJitter * (0.4 + 0.8 * grow), wave);
+          const tailPt = projectExpandingPoint(
+            grow,
+            theta - streakLen,
+            p.radialJitter * (0.4 + 0.8 * grow),
             wave
           );
 
-          const depthVis = getDepthVisibility(p.orbitIndex, headPt.u, headPt.v, theta);
-          const twinkle = 0.35 + 0.65 * Math.sin(elapsedSec * 4.2 + p.phase * 2.0);
-          const alpha = p.alpha * twinkle * depthVis;
+          const vis = getVisibility(headPt.u, headPt.v, theta) * lifeAlpha;
+          const twinkle = 0.35 + 0.65 * Math.sin(elapsedSec * 4.0 + p.phase * 2.0);
+          const alpha = p.alpha * twinkle * vis;
+          const sparkSize = (0.55 + 2.1 * grow) * Math.max(0.75, headPt.scale);
 
-          if (alpha > 0.06) {
+          if (alpha > 0.05) {
             ctx.strokeStyle = getColorRgba(p.hue, alpha * 0.85);
-            ctx.lineWidth = Math.max(0.7, p.size * Math.max(0.75, headPt.scale));
+            ctx.lineWidth = Math.max(0.5, sparkSize);
             ctx.beginPath();
             ctx.moveTo(tailPt.x, tailPt.y);
             ctx.lineTo(headPt.x, headPt.y);
@@ -342,7 +311,7 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
 
             ctx.fillStyle = `rgba(255, 252, 240, ${Math.min(1, alpha * 0.95)})`;
             ctx.beginPath();
-            ctx.arc(headPt.x, headPt.y, Math.max(0.6, p.size * 0.65 * headPt.scale), 0, Math.PI * 2);
+            ctx.arc(headPt.x, headPt.y, Math.max(0.5, sparkSize * 0.6), 0, Math.PI * 2);
             ctx.fill();
           }
         }

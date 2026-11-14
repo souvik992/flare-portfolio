@@ -32,3 +32,38 @@
   mask-composite: exclude;
   pointer-events: none;
 }
+
+@keyframes thinkingPulse {
+  0%,
+  100% {
+    opacity: 0.52;
+    background-position: 100% 50%;
+  }
+  50% {
+    opacity: 1;
+    background-position: 0% 50%;
+  }
+}
+
+.thinking-pulse {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(186, 230, 253, 0.95) 50%,
+    rgba(255, 255, 255, 0.55) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinkingPulse 1.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-pulse {
+    animation: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.78);
+  }
+}
+
