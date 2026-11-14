@@ -1,0 +1,6 @@
+{
+  "name": "Asme",
+  "description": "Built for the curious — Stay updated with the latest news and insights from Asme.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
