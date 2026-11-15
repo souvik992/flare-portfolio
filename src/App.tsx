@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, Globe, Instagram, Twitter, Loader2, RotateCcw, X } from 'lucide-react';
+import { ArrowRight, Facebook, Globe, Instagram, Loader2, RotateCcw } from 'lucide-react';
 import heroCharacterScene from './assets/images/hero_character_clean_1794682347026.jpg';
 import { AnimatedFlares } from './components/AnimatedFlares';
 import { CharacterMotionCanvas } from './components/CharacterMotionCanvas';
@@ -11,8 +11,6 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
 }
-
-type SocialChannel = 'Instagram' | 'Twitter' | 'Website' | null;
 
 export default function App() {
   const bgLayerRef = useRef<HTMLDivElement | null>(null);
@@ -29,7 +27,6 @@ export default function App() {
   const [interactionId, setInteractionId] = useState<string | undefined>(undefined);
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState('');
-  const [activeSocial, setActiveSocial] = useState<SocialChannel>(null);
 
   const cancelCurrentFade = useCallback(() => {
     if (rafRef.current !== null) {
@@ -210,7 +207,6 @@ export default function App() {
             onClick={(e) => {
               e.preventDefault();
               handleClearChat();
-              setActiveSocial(null);
             }}
             className="flex items-center gap-2 text-white font-semibold text-lg whitespace-nowrap shrink-0"
           >
@@ -230,7 +226,7 @@ export default function App() {
           className="text-5xl md:text-6xl lg:text-7xl text-white mb-8 tracking-tight whitespace-nowrap"
           style={{ fontFamily: "'Instrument Serif', serif" }}
         >
-          Ask Souvik
+          Inside a curious mind
         </h1>
 
         <div className="max-w-xl w-full space-y-3">
@@ -327,67 +323,25 @@ export default function App() {
 
       {/* Social icons footer */}
       <footer className="relative z-10 flex justify-center gap-4 pb-12">
-        <button
-          type="button"
-          onClick={() => setActiveSocial('Instagram')}
+        <a
+          href="https://www.facebook.com/souvik.gayen.825344/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Souvik on Facebook"
+          className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all"
+        >
+          <Facebook size={20} />
+        </a>
+        <a
+          href="https://www.instagram.com/souvikg_official/"
+          target="_blank"
+          rel="noopener noreferrer"
           aria-label="Souvik on Instagram"
-          className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+          className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all"
         >
           <Instagram size={20} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveSocial('Twitter')}
-          aria-label="Souvik on Twitter"
-          className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-        >
-          <Twitter size={20} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveSocial('Website')}
-          aria-label="Souvik website"
-          className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-        >
-          <Globe size={20} />
-        </button>
+        </a>
       </footer>
-
-      {activeSocial && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
-          onClick={() => setActiveSocial(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Connect with Souvik on ${activeSocial}`}
-            onClick={(e) => e.stopPropagation()}
-            className="liquid-glass rounded-3xl max-w-sm w-full p-6 text-white bg-black/80"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h2
-                className="text-2xl tracking-tight text-white"
-                style={{ fontFamily: "'Instrument Serif', serif" }}
-              >
-                {activeSocial}
-              </h2>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => setActiveSocial(null)}
-                className="liquid-glass rounded-full p-2 text-white/80 hover:text-white transition-colors cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-sm text-white/80 leading-relaxed">
-              Connect with Souvik via the AI chat above or reach out directly at{' '}
-              <span className="text-white">souvik.g@palletnow.co</span>.
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
