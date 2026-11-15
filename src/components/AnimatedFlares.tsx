@@ -2,6 +2,8 @@ import React, { useEffect, useRef } from 'react';
 
 interface AnimatedFlaresProps {
   imageAspectRatio?: number;
+  isThinking?: boolean;
+  replyPulseCount?: number;
 }
 
 interface ExpandingStream {
@@ -23,7 +25,18 @@ interface ExpandingSpark {
   alpha: number;
 }
 
-const CYCLE_RATE = 0.135; // Matches CharacterMotionCanvas 7.4s expansion cycle
+interface InteractiveSpark {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  hue: 'ice' | 'cyan' | 'gold' | 'amber';
+}
+
+const CYCLE_RATE = 0.135;
 
 const STREAMS: ExpandingStream[] = [
   { phaseOffset: 0.0, baseAngle: 0.2, arcSpan: 1.45, hue: 'cyan', speed: 1.35 },
@@ -61,6 +74,7 @@ function createSparks(): ExpandingSpark[] {
 }
 
 const SPARKS = createSparks();
+const HUE_POOL: Array<'ice' | 'cyan' | 'gold' | 'amber'> = ['cyan', 'gold', 'ice', 'amber'];
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
@@ -74,21 +88,17 @@ function getColorRgba(hue: 'ice' | 'cyan' | 'gold' | 'amber', alpha: number): st
   return `rgba(240, 250, 255, ${alpha})`;
 }
 
-// Strict 3D depth & face-safe visibility so character is always inside the flare and never cut across the face
 function getVisibility(u: number, v: number, theta: number): number {
-  // Face-safe exclusion ellipse around Souvik's head & face
   const dxFace = (u - 0.498) / 0.068;
   const dyFace = (v - 0.498) / 0.105;
   const faceDist = Math.sqrt(dxFace * dxFace + dyFace * dyFace);
   const faceSafe = smoothstep(0.78, 1.28, faceDist);
 
-  // Hand/keyboard protection
   const dxHand = (u - 0.46) / 0.095;
   const dyHand = (v - 0.79) / 0.055;
   const handDist = Math.sqrt(dxHand * dxHand + dyHand * dyHand);
   const handShield = smoothstep(0.45, 1.25, handDist);
 
-  // Back arc (sin(theta) < 0) goes behind character's head & shoulders
   const sinTheta = Math.sin(theta);
   if (sinTheta < 0.18) {
     const dxBody = (u - 0.515) / 0.105;
@@ -105,8 +115,12 @@ function getVisibility(u: number, v: number, theta: number): number {
 
 export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
   imageAspectRatio = 16 / 9,
+  isThinking = false,
+  replyPulseCount = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activityRef = useRef({ isThinking, replyPulseCount });
+  activityRef.current = { isThinking, replyPulseCount };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -125,6 +139,14 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
     let dpr = 1;
     let rafId: number | null = null;
 
+    const interactiveSparks: InteractiveSpark[] = [];
+    let lastSpawnX = -999;
+    let lastSpawnY = -999;
+    let sparkHueCounter = 0;
+    let thinkingSmooth = 0;
+    let replyBoost = 0;
+    let lastReplySeen = activityRef.current.replyPulseCount;
+
     const updateSize = () => {
       const rect = canvas.getBoundingClientRect();
       width = rect.width;
@@ -139,6 +161,67 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
 
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(canvas);
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (prefersReducedMotion) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+
+      const dx = x - lastSpawnX;
+      const dy = y - lastSpawnY;
+      if (dx * dx + dy * dy < 140) return;
+
+      lastSpawnX = x;
+      lastSpawnY = y;
+
+      if (interactiveSparks.length < 70) {
+        const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 1.4;
+        const speed = 18 + Math.random() * 28;
+        interactiveSparks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed * 0.4 + (Math.random() - 0.5) * 14,
+          vy: Math.sin(angle) * speed * 0.4 - 8 - Math.random() * 14,
+          life: 0,
+          maxLife: 0.65 + Math.random() * 0.55,
+          size: 1.1 + Math.random() * 1.8,
+          hue: HUE_POOL[sparkHueCounter++ % HUE_POOL.length],
+        });
+      }
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (prefersReducedMotion) return;
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('button, a, input, textarea, form')) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+
+      const count = 20;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
+        const speed = 35 + Math.random() * 75;
+        interactiveSparks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0,
+          maxLife: 0.75 + Math.random() * 0.5,
+          size: 1.4 + Math.random() * 2.2,
+          hue: HUE_POOL[(sparkHueCounter + i) % HUE_POOL.length],
+        });
+      }
+      sparkHueCounter += count;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
 
     const projectExpandingPoint = (
       grow: number,
@@ -162,7 +245,6 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
         offsetX = (width - drawW) / 2;
       }
 
-      // Orbit expands gradually from small/compact around Souvik to wide sweeping workspace halo
       const rx = 0.24 + (0.54 - 0.24) * grow + radialDelta;
       const ry = 0.18 + (0.30 - 0.18) * grow + radialDelta * 0.55;
       const cx = 0.5;
@@ -219,37 +301,52 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
     };
 
     const startTime = performance.now();
+    let prevTime = startTime;
 
     const renderFrame = (now: number) => {
+      const dt = Math.min((now - prevTime) / 1000, 0.05);
+      prevTime = now;
+
+      const targetThinking = activityRef.current.isThinking ? 1 : 0;
+      thinkingSmooth += (targetThinking - thinkingSmooth) * 0.06;
+
+      if (activityRef.current.replyPulseCount !== lastReplySeen) {
+        lastReplySeen = activityRef.current.replyPulseCount;
+        replyBoost = 1;
+      } else {
+        replyBoost *= 0.965;
+      }
+
       if (width > 0 && height > 0) {
-        const elapsedSec = prefersReducedMotion ? 0.35 / CYCLE_RATE : (now - startTime) / 1000;
+        const rawSec = prefersReducedMotion ? 0.35 / CYCLE_RATE : (now - startTime) / 1000;
+        const elapsedSec = rawSec * (1 + 0.12 * thinkingSmooth);
 
         ctx.clearRect(0, 0, width, height);
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
 
-        // 1. Expanding spiral light ribbons (start small, gradually grow larger as they orbit)
+        const brightnessBoost = 1 + 0.28 * thinkingSmooth + 0.38 * replyBoost;
+
         for (const stream of STREAMS) {
           const cycle = (elapsedSec * CYCLE_RATE + stream.phaseOffset) % 1;
           const grow = smoothstep(0.0, 0.92, cycle);
           const lifeAlpha = smoothstep(0.0, 0.14, cycle) * (1 - smoothstep(0.74, 1.0, cycle));
 
-          // Both width and flare crest radius start small and gradually grow bigger
-          const widthBase = 1.4 + 4.8 * grow;
+          const widthBase = (1.4 + 4.8 * grow) * (1 + 0.2 * thinkingSmooth + 0.25 * replyBoost);
           const headAngle = stream.baseAngle + elapsedSec * stream.speed;
           const steps = 34;
 
           let prevPt = projectExpandingPoint(grow, headAngle - stream.arcSpan);
 
           for (let s = 1; s <= steps; s++) {
-            const frac = s / steps; // Tail (0) -> Head (1) grows along arc too
+            const frac = s / steps;
             const segAngle = headAngle - (1 - frac) * stream.arcSpan;
             const radialRipple =
               Math.sin(segAngle * 4.0 - elapsedSec * 2.4) * (0.003 + 0.006 * grow);
             const pt = projectExpandingPoint(grow, segAngle, radialRipple);
 
             const vis = getVisibility(pt.u, pt.v, segAngle) * lifeAlpha;
-            const segAlpha = Math.pow(frac, 1.7) * 0.64 * vis;
+            const segAlpha = Math.min(1, Math.pow(frac, 1.7) * 0.64 * vis * brightnessBoost);
 
             if (segAlpha > 0.015) {
               ctx.strokeStyle = getColorRgba(stream.hue, segAlpha);
@@ -260,7 +357,7 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
               ctx.stroke();
 
               if (frac > 0.45) {
-                ctx.strokeStyle = `rgba(255, 252, 245, ${(frac - 0.45) * 0.72 * vis})`;
+                ctx.strokeStyle = `rgba(255, 252, 245, ${Math.min(1, (frac - 0.45) * 0.72 * vis * brightnessBoost)})`;
                 ctx.lineWidth = Math.max(0.4, widthBase * 0.32 * pt.scale * frac);
                 ctx.beginPath();
                 ctx.moveTo(prevPt.x, prevPt.y);
@@ -274,11 +371,16 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
 
           const headPt = projectExpandingPoint(grow, headAngle);
           const headVis = getVisibility(headPt.u, headPt.v, headAngle) * lifeAlpha;
-          const crestRadius = (6 + 22 * grow) * headPt.scale;
-          drawCrestFlare(headPt.x, headPt.y, crestRadius, stream.hue, 0.8 * headVis);
+          const crestRadius = (6 + 22 * grow) * headPt.scale * (1 + 0.25 * replyBoost);
+          drawCrestFlare(
+            headPt.x,
+            headPt.y,
+            crestRadius,
+            stream.hue,
+            Math.min(1, 0.8 * headVis * brightnessBoost)
+          );
         }
 
-        // 2. Orbiting sparks that start tiny and gradually grow larger as they spiral outward
         for (const p of SPARKS) {
           const cycle = (elapsedSec * CYCLE_RATE + p.phaseOffset) % 1;
           const grow = smoothstep(0.0, 0.92, cycle);
@@ -298,7 +400,7 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
 
           const vis = getVisibility(headPt.u, headPt.v, theta) * lifeAlpha;
           const twinkle = 0.35 + 0.65 * Math.sin(elapsedSec * 4.0 + p.phase * 2.0);
-          const alpha = p.alpha * twinkle * vis;
+          const alpha = Math.min(1, p.alpha * twinkle * vis * brightnessBoost);
           const sparkSize = (0.55 + 2.1 * grow) * Math.max(0.75, headPt.scale);
 
           if (alpha > 0.05) {
@@ -315,6 +417,38 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
             ctx.fill();
           }
         }
+
+        // Interactive cursor trail & click burst sparks
+        for (let i = interactiveSparks.length - 1; i >= 0; i--) {
+          const sp = interactiveSparks[i];
+          sp.life += dt;
+          if (sp.life >= sp.maxLife) {
+            interactiveSparks.splice(i, 1);
+            continue;
+          }
+
+          const prevX = sp.x;
+          const prevY = sp.y;
+          sp.vx *= 0.97;
+          sp.vy *= 0.97;
+          sp.x += sp.vx * dt;
+          sp.y += sp.vy * dt;
+
+          const progress = sp.life / sp.maxLife;
+          const alpha = (1 - progress) * (1 - progress) * 0.88;
+
+          ctx.strokeStyle = getColorRgba(sp.hue, alpha);
+          ctx.lineWidth = sp.size * (1 - progress * 0.4);
+          ctx.beginPath();
+          ctx.moveTo(prevX, prevY);
+          ctx.lineTo(sp.x, sp.y);
+          ctx.stroke();
+
+          ctx.fillStyle = `rgba(255, 252, 245, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, sp.size * 0.65, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       if (!prefersReducedMotion) {
@@ -325,6 +459,8 @@ export const AnimatedFlares: React.FC<AnimatedFlaresProps> = ({
     rafId = requestAnimationFrame(renderFrame);
 
     return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerdown', handlePointerDown);
       resizeObserver.disconnect();
       if (rafId !== null) {
         cancelAnimationFrame(rafId);

@@ -2,6 +2,9 @@ import React, { useEffect, useRef } from 'react';
 
 interface CharacterMotionCanvasProps {
   imageSrc: string;
+  isUserTyping?: boolean;
+  isThinking?: boolean;
+  replyPulseCount?: number;
   onReady?: (aspectRatio: number) => void;
   onFallback?: () => void;
 }
@@ -23,6 +26,10 @@ const FRAGMENT_SHADER_SRC = `
   uniform vec2 u_resolution;
   uniform float u_imgAspect;
   uniform float u_time;
+  uniform vec2 u_pointer;
+  uniform float u_pointerEnergy;
+  uniform vec3 u_activity; // x: userTyping, y: aiThinking, z: replyPulse
+  uniform vec3 u_burst;    // xy: click screen UV, z: age in seconds (negative = inactive)
 
   float hash21(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -70,8 +77,18 @@ const FRAGMENT_SHADER_SRC = `
     return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
   }
 
-  // Evaluates one expanding flare wave that starts small/tight around the character
-  // and gradually grows bigger as it orbits outward, never cutting the face.
+  vec2 screenToImageUv(vec2 screenUv, float canvasAspect, float imgAspect) {
+    vec2 res = screenUv;
+    if (canvasAspect > imgAspect) {
+      float scale = imgAspect / canvasAspect;
+      res.y = (res.y - 0.5) * scale + 0.5;
+    } else {
+      float scale = canvasAspect / imgAspect;
+      res.x = (res.x - 0.5) * scale + 0.5;
+    }
+    return res;
+  }
+
   vec3 evalExpandingFlareWave(
     vec2 uv,
     float t,
@@ -79,14 +96,16 @@ const FRAGMENT_SHADER_SRC = `
     float headOcc,
     float bodyOcc,
     float faceSafe,
-    float handsShield
+    float handsShield,
+    float thinkingBoost,
+    float replyBoost,
+    vec2 pointerImgUv,
+    float pointerEnergy
   ) {
-    // Smooth 7.5-second expansion cycle [0..1)
     float cycle = fract(t * 0.135 + phaseOffset);
     float grow = smoothstep(0.0, 0.92, cycle);
     float lifeAlpha = smoothstep(0.0, 0.14, cycle) * (1.0 - smoothstep(0.74, 1.0, cycle));
 
-    // Orbit grows from compact around character -> wide sweeping workspace halo
     vec2 radii = mix(vec2(0.24, 0.18), vec2(0.54, 0.30), grow);
     vec2 center = mix(vec2(0.50, 0.67), vec2(0.50, 0.70), grow);
     float tilt = mix(-0.18, -0.05, grow);
@@ -95,13 +114,17 @@ const FRAGMENT_SHADER_SRC = `
     float theta = ec.x;
     float dist = ec.y;
 
+    // Interactive cursor gravitational shimmer near pointer
+    float ptrDist = length(uv - pointerImgUv);
+    float ptrProximity = exp(-pow(ptrDist / 0.18, 2.0)) * pointerEnergy;
+
     float flowA = fbm(vec2(theta * 3.0 - t * 1.25 + phaseOffset * 6.0, dist * 12.0 + t * 0.35));
     float flowB = fbm(vec2(theta * 6.0 - t * 1.85 + phaseOffset * 11.0, dist * 20.0 - t * 0.55));
     float warp = (flowA - 0.5) * mix(0.045, 0.095, grow) + (flowB - 0.5) * mix(0.015, 0.038, grow);
+    warp += ptrProximity * 0.025 * sin(theta * 5.0 - t * 3.0);
 
-    // Thickness & bloom start small and gradually become bigger
-    float coreWidth = mix(0.014, 0.036, grow);
-    float auraWidth = mix(0.045, 0.135, grow);
+    float coreWidth = mix(0.014, 0.036, grow) * (1.0 + 0.25 * thinkingBoost + 0.3 * replyBoost);
+    float auraWidth = mix(0.045, 0.135, grow) * (1.0 + 0.2 * thinkingBoost);
 
     float core = exp(-pow((dist + warp) / coreWidth, 2.0));
     float wisps = exp(-pow((dist + warp * 1.4) / (coreWidth * 2.2), 2.0)) * flowB;
@@ -110,9 +133,6 @@ const FRAGMENT_SHADER_SRC = `
     float waveCyan = pow(0.5 + 0.5 * cos(theta - t * 1.35 - phaseOffset * 6.283), 3.4);
     float waveGold = pow(0.5 + 0.5 * cos(theta + 2.5 - t * 1.35 - phaseOffset * 6.283), 3.8);
 
-    // Character sits INSIDE the 3D ellipse:
-    // Top/back arc (sin(theta) < 0) passes cleanly behind head & upper body;
-    // Front arc (sin(theta) > 0) sweeps below face & clear of hands.
     float personOcc = min(headOcc, bodyOcc);
     float backOcclusion = mix(1.0, personOcc, smoothstep(0.18, -0.25, sin(theta)));
     float visibility = lifeAlpha * backOcclusion * faceSafe * handsShield;
@@ -122,10 +142,11 @@ const FRAGMENT_SHADER_SRC = `
     vec3 amberCol = vec3(1.0, 0.50, 0.14);
     vec3 whiteHot = vec3(1.0, 0.98, 0.94);
 
-    float intensityScale = mix(0.55, 1.15, grow);
+    float intensityScale = mix(0.55, 1.15, grow) * (1.0 + 0.35 * thinkingBoost + 0.45 * replyBoost + 0.35 * ptrProximity);
 
     vec3 col =
-      (cyanCol * (0.22 + 1.15 * waveCyan) + goldCol * (0.18 + 1.25 * waveGold)) *
+      (cyanCol * (0.22 + 1.15 * waveCyan + 0.45 * thinkingBoost) +
+       goldCol * (0.18 + 1.25 * waveGold + 0.55 * replyBoost)) *
         (core * (0.55 + 1.05 * flowB) + wisps * 0.8) +
       mix(cyanCol, amberCol, waveGold) * aura * (0.12 + 0.38 * (waveCyan + waveGold)) +
       whiteHot * core * (pow(waveCyan, 2.0) * 0.65 + pow(waveGold, 2.0) * 0.60);
@@ -135,21 +156,23 @@ const FRAGMENT_SHADER_SRC = `
 
   void main() {
     float canvasAspect = u_resolution.x / max(u_resolution.y, 1.0);
-    vec2 uv = v_uv;
-    if (canvasAspect > u_imgAspect) {
-      float scale = u_imgAspect / canvasAspect;
-      uv.y = (uv.y - 0.5) * scale + 0.5;
-    } else {
-      float scale = canvasAspect / u_imgAspect;
-      uv.x = (uv.x - 0.5) * scale + 0.5;
-    }
+    vec2 baseUv = screenToImageUv(v_uv, canvasAspect, u_imgAspect);
+    vec2 pointerImgUv = screenToImageUv(u_pointer, canvasAspect, u_imgAspect);
+
+    // Subtle smooth 3D spatial parallax from cursor position (clamped gently)
+    vec2 parallax = (u_pointer - 0.5) * 0.0085 * u_pointerEnergy;
+    vec2 uv = baseUv - parallax * 0.55;
 
     float t = u_time;
+    float userTyping = u_activity.x;
+    float aiThinking = u_activity.y;
+    float replyPulse = u_activity.z;
 
     // ---------------------------------------------------------
-    // 1. CALM, STEADY CHARACTER TYPING ANIMATION (NO SHAKING)
+    // 1. INTERACTIVE CHARACTER ANIMATION (CALM TYPING, NO SHAKING)
     // ---------------------------------------------------------
-    float cadence = smoothstep(-0.15, 0.45, sin(t * 1.05) + 0.3 * sin(t * 0.45));
+    float baseCadence = smoothstep(-0.15, 0.45, sin(t * 1.05) + 0.3 * sin(t * 0.45));
+    float cadence = clamp(baseCadence + userTyping * 0.45 - aiThinking * 0.35, 0.12, 1.0);
 
     float breath = sin(t * 1.35);
     vec2 torsoPivot = vec2(0.535, 0.71);
@@ -157,15 +180,17 @@ const FRAGMENT_SHADER_SRC = `
     float torsoMask = exp(-dot(torsoRel, torsoRel));
     vec2 torsoDisp = vec2(0.0, breath * 0.0046);
 
+    // Head subtly tracks cursor attention & tilts thoughtfully while AI is thinking
     vec2 neckPivot = vec2(0.515, 0.57);
     vec2 headRel = (uv - vec2(0.498, 0.492)) / vec2(0.068, 0.090);
     float headMask = exp(-dot(headRel, headRel));
-    float headAngle = sin(t * 0.75) * 0.022;
+    float ptrHeadTilt = (u_pointer.x - 0.5) * -0.028 * u_pointerEnergy;
+    float headAngle = sin(t * 0.75) * 0.020 + ptrHeadTilt + aiThinking * sin(t * 1.8) * 0.015;
     vec2 rotatedHead = neckPivot + rotate2D(uv - neckPivot, headAngle);
     vec2 headRotDisp = (rotatedHead - uv) * headMask;
     vec2 headBob = vec2(
-      sin(t * 0.65) * 0.0025,
-      breath * 0.0040 + sin(t * 1.45 + 0.5) * 0.0016
+      sin(t * 0.65) * 0.0025 + (u_pointer.x - 0.5) * 0.003 * u_pointerEnergy,
+      breath * 0.0040 + sin(t * 1.45 + 0.5) * 0.0016 + (u_pointer.y - 0.5) * 0.0025 * u_pointerEnergy
     ) * headMask;
 
     // Grounded wrists/arms + clean downward fingertip key-presses only
@@ -174,10 +199,11 @@ const FRAGMENT_SHADER_SRC = `
     vec2 rFingerZone = (uv - vec2(0.483, 0.786)) / vec2(0.023, 0.017);
     float rFingerMask = exp(-dot(rFingerZone, rFingerZone));
 
-    float lTap1 = pow(max(0.0, sin(t * 5.2)), 6.0);
-    float lTap2 = pow(max(0.0, sin(t * 5.2 + 1.85)), 6.0);
-    float rTap1 = pow(max(0.0, sin(t * 5.2 + 0.95)), 6.0);
-    float rTap2 = pow(max(0.0, sin(t * 5.2 + 2.85)), 6.0);
+    float tapSpeed = 5.2 + userTyping * 2.2;
+    float lTap1 = pow(max(0.0, sin(t * tapSpeed)), 6.0);
+    float lTap2 = pow(max(0.0, sin(t * tapSpeed + 1.85)), 6.0);
+    float rTap1 = pow(max(0.0, sin(t * tapSpeed + 0.95)), 6.0);
+    float rTap2 = pow(max(0.0, sin(t * tapSpeed + 2.85)), 6.0);
 
     vec2 fingerDisp =
       lFingerMask * vec2(0.0, (lTap1 * 0.0046 + lTap2 * 0.0034) * cadence) +
@@ -214,43 +240,54 @@ const FRAGMENT_SHADER_SRC = `
     vec3 baseColor = texture2D(u_tex, sampleUv).rgb;
 
     // ---------------------------------------------------------
-    // 2. ANIMATED EXPANDING FLARES AROUND CHARACTER (INSIDE FLARE)
+    // 2. ANIMATED EXPANDING FLARES + INTERACTIVE CURSOR & CLICK BURST
     // ---------------------------------------------------------
-
-    // Occlusion & protection masks so character stays clearly inside the flare
     vec2 headOccDelta = (uv - vec2(0.498, 0.495)) / vec2(0.056, 0.095);
     float headOcc = smoothstep(0.55, 1.18, length(headOccDelta));
 
     vec2 bodyOccDelta = (uv - vec2(0.525, 0.695)) / vec2(0.105, 0.185);
     float bodyOcc = smoothstep(0.45, 1.15, length(bodyOccDelta));
 
-    // Strict face-safe mask so NO flare ever cuts across the face
     vec2 faceSafeDelta = (uv - vec2(0.498, 0.498)) / vec2(0.068, 0.105);
     float faceSafe = smoothstep(0.78, 1.28, length(faceSafeDelta));
 
-    // Keep hands/keyboard free of distortion
     vec2 handsShieldDelta = (uv - vec2(0.46, 0.79)) / vec2(0.095, 0.055);
     float handsShield = smoothstep(0.45, 1.25, length(handsShieldDelta));
 
-    // Three staggered expanding waves: small near character -> grow larger outward
-    vec3 flareW1 = evalExpandingFlareWave(uv, t, 0.00, headOcc, bodyOcc, faceSafe, handsShield);
-    vec3 flareW2 = evalExpandingFlareWave(uv, t, 0.33, headOcc, bodyOcc, faceSafe, handsShield);
-    vec3 flareW3 = evalExpandingFlareWave(uv, t, 0.67, headOcc, bodyOcc, faceSafe, handsShield);
+    float flareTime = t * (1.0 + 0.18 * aiThinking);
+    vec3 flareW1 = evalExpandingFlareWave(uv, flareTime, 0.00, headOcc, bodyOcc, faceSafe, handsShield, aiThinking, replyPulse, pointerImgUv, u_pointerEnergy);
+    vec3 flareW2 = evalExpandingFlareWave(uv, flareTime, 0.33, headOcc, bodyOcc, faceSafe, handsShield, aiThinking, replyPulse, pointerImgUv, u_pointerEnergy);
+    vec3 flareW3 = evalExpandingFlareWave(uv, flareTime, 0.67, headOcc, bodyOcc, faceSafe, handsShield, aiThinking, replyPulse, pointerImgUv, u_pointerEnergy);
 
-    vec3 totalFlare = clamp((flareW1 + flareW2 + flareW3) * 0.92, 0.0, 0.98);
+    // Interactive cursor aura glow (stays clear of face)
+    float ptrGlowDist = length((v_uv - u_pointer) * vec2(canvasAspect, 1.0));
+    float ptrGlow = exp(-pow(ptrGlowDist / 0.16, 2.0)) * 0.22 * u_pointerEnergy * faceSafe * handsShield;
+    vec3 ptrColor = mix(vec3(0.32, 0.80, 1.0), vec3(1.0, 0.72, 0.25), 0.5 + 0.5 * sin(t * 2.0)) * ptrGlow;
 
-    // Subtle dynamic rim & bounce light from the orbiting flares
+    // Interactive click/tap expanding flare ripple
+    vec3 burstColor = vec3(0.0);
+    if (u_burst.z >= 0.0 && u_burst.z < 1.35) {
+      float age = u_burst.z;
+      float bRadius = 0.02 + age * 0.48;
+      float bDist = length((v_uv - u_burst.xy) * vec2(canvasAspect, 1.0));
+      float bRing = exp(-pow((bDist - bRadius) / (0.015 + age * 0.025), 2.0));
+      float bFade = (1.0 - smoothstep(0.0, 1.35, age)) * faceSafe;
+      burstColor = mix(vec3(0.4, 0.85, 1.0), vec3(1.0, 0.78, 0.35), age / 1.35) * bRing * bFade * 0.85;
+    }
+
+    vec3 totalFlare = clamp((flareW1 + flareW2 + flareW3 + ptrColor + burstColor) * 0.92, 0.0, 0.98);
+
     vec3 goldCol = vec3(1.0, 0.72, 0.25);
     vec3 cyanCol = vec3(0.32, 0.80, 1.0);
 
     vec2 screenGlowDelta = (uv - vec2(0.495, 0.54)) / vec2(0.11, 0.11);
     float screenGlowMask = exp(-dot(screenGlowDelta, screenGlowDelta)) * handsShield;
-    float screenGlow = 0.04 + 0.015 * sin(t * 1.4);
+    float screenGlow = 0.04 + 0.015 * sin(t * 1.4) + userTyping * 0.035;
 
     vec3 litBase = baseColor;
     litBase += baseColor * vec3(0.60, 0.86, 1.2) * screenGlowMask * screenGlow;
-    litBase += baseColor * goldCol * (lFlowerMask + rFlowerMask) * (0.04 + 0.08 * (0.5 + 0.5 * sin(t * 1.35)));
-    litBase += baseColor * cyanCol * torsoMask * handsShield * (0.02 + 0.05 * (0.5 + 0.5 * cos(t * 1.35)));
+    litBase += baseColor * goldCol * (lFlowerMask + rFlowerMask) * (0.04 + 0.08 * (0.5 + 0.5 * sin(t * 1.35)) + 0.08 * replyPulse);
+    litBase += baseColor * cyanCol * torsoMask * handsShield * (0.02 + 0.05 * (0.5 + 0.5 * cos(t * 1.35)) + 0.06 * aiThinking);
 
     vec3 finalColor = 1.0 - (1.0 - litBase) * (1.0 - totalFlare);
     gl_FragColor = vec4(finalColor, 1.0);
@@ -271,15 +308,28 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string):
 
 export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
   imageSrc,
+  isUserTyping = false,
+  isThinking = false,
+  replyPulseCount = 0,
   onReady,
   onFallback,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const onReadyRef = useRef(onReady);
   const onFallbackRef = useRef(onFallback);
+  const activityTargetRef = useRef({
+    userTyping: isUserTyping ? 1 : 0,
+    aiThinking: isThinking ? 1 : 0,
+    replyPulseTrigger: replyPulseCount,
+  });
 
   onReadyRef.current = onReady;
   onFallbackRef.current = onFallback;
+  activityTargetRef.current = {
+    userTyping: isUserTyping ? 1 : 0,
+    aiThinking: isThinking ? 1 : 0,
+    replyPulseTrigger: replyPulseCount,
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -336,6 +386,10 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
     const resLoc = gl.getUniformLocation(program, 'u_resolution');
     const aspectLoc = gl.getUniformLocation(program, 'u_imgAspect');
     const timeLoc = gl.getUniformLocation(program, 'u_time');
+    const pointerLoc = gl.getUniformLocation(program, 'u_pointer');
+    const pointerEnergyLoc = gl.getUniformLocation(program, 'u_pointerEnergy');
+    const activityLoc = gl.getUniformLocation(program, 'u_activity');
+    const burstLoc = gl.getUniformLocation(program, 'u_burst');
 
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -349,10 +403,49 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
     let disposed = false;
     let rafId: number | null = null;
 
+    // Interactive pointer & activity state (mutated directly in rAF, zero React re-renders)
+    const targetPtr = { x: 0.5, y: 0.5, active: 0 };
+    const smoothPtr = { x: 0.5, y: 0.5, energy: 0 };
+    const smoothAct = {
+      typing: 0,
+      thinking: 0,
+      replyPulse: 0,
+      lastPulseCount: activityTargetRef.current.replyPulseTrigger,
+    };
+    const burstState = { x: 0.5, y: 0.5, startTime: -1 };
+
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (prefersReducedMotion) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      targetPtr.x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+      targetPtr.y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1);
+      targetPtr.active = 1;
+    };
+
+    const handlePointerLeave = () => {
+      targetPtr.active = 0;
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (prefersReducedMotion) return;
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('button, a, input, textarea, form')) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      burstState.x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+      burstState.y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1);
+      burstState.startTime = performance.now();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerleave', handlePointerLeave, { passive: true });
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
 
     const updateSize = () => {
       if (!canvas) return;
@@ -375,6 +468,24 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
 
     const draw = (now: number) => {
       if (disposed) return;
+
+      smoothPtr.x += (targetPtr.x - smoothPtr.x) * 0.08;
+      smoothPtr.y += (targetPtr.y - smoothPtr.y) * 0.08;
+      smoothPtr.energy += (targetPtr.active - smoothPtr.energy) * 0.06;
+
+      const actTarget = activityTargetRef.current;
+      smoothAct.typing += (actTarget.userTyping - smoothAct.typing) * 0.08;
+      smoothAct.thinking += (actTarget.aiThinking - smoothAct.thinking) * 0.06;
+
+      if (actTarget.replyPulseTrigger !== smoothAct.lastPulseCount) {
+        smoothAct.lastPulseCount = actTarget.replyPulseTrigger;
+        smoothAct.replyPulse = 1.0;
+      } else {
+        smoothAct.replyPulse *= 0.965;
+      }
+
+      const burstAge = burstState.startTime >= 0 ? (now - burstState.startTime) / 1000 : -1;
+
       if (textureReady && canvas.width > 0 && canvas.height > 0) {
         const elapsed = prefersReducedMotion ? 0 : (now - startTime) / 1000;
         gl.useProgram(program);
@@ -384,6 +495,10 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
         gl.uniform2f(resLoc, canvas.width, canvas.height);
         gl.uniform1f(aspectLoc, imgAspect);
         gl.uniform1f(timeLoc, elapsed);
+        gl.uniform2f(pointerLoc, smoothPtr.x, smoothPtr.y);
+        gl.uniform1f(pointerEnergyLoc, smoothPtr.energy);
+        gl.uniform3f(activityLoc, smoothAct.typing, smoothAct.thinking, smoothAct.replyPulse);
+        gl.uniform3f(burstLoc, burstState.x, burstState.y, burstAge);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
 
@@ -417,6 +532,9 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
 
     return () => {
       disposed = true;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerleave', handlePointerLeave);
+      window.removeEventListener('pointerdown', handlePointerDown);
       resizeObserver.disconnect();
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -432,7 +550,7 @@ export const CharacterMotionCanvas: React.FC<CharacterMotionCanvasProps> = ({
   return (
     <canvas
       ref={canvasRef}
-      aria-label="Animated scene with Souvik typing calmly at laptop inside expanding luminous flares"
+      aria-label="Interactive animated scene with Souvik typing calmly at laptop inside expanding luminous flares"
       className="w-full h-full translate-y-[4%] pointer-events-none select-none block"
     />
   );
