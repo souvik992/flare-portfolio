@@ -16,6 +16,15 @@ import heroCharacterScene from './assets/images/hero_character_clean_17946823470
 import { AnimatedFlares } from './components/AnimatedFlares';
 import { CharacterMotionCanvas } from './components/CharacterMotionCanvas';
 
+// Backend for the "Ask Souvik" chat. GitHub Pages only serves static files, so the
+// Express server (server.ts) must be hosted elsewhere and its URL provided at build
+// time via VITE_API_BASE_URL. Empty means same origin (local `npm run dev`).
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const apiUrl = (path: string) => `${API_BASE}${path}`;
+const BACKEND_MISSING = import.meta.env.PROD && !API_BASE;
+const BACKEND_MISSING_MSG =
+  "The chat backend isn't connected on this deployment yet. Please check back soon!";
+
 const FADE_DURATION_MS = 500;
 
 interface ChatMessage {
@@ -119,8 +128,9 @@ export default function App() {
   }, [messages, isSending]);
 
   useEffect(() => {
+    if (BACKEND_MISSING) return;
     let active = true;
-    fetch('/api/resume')
+    fetch(apiUrl('/api/resume'))
       .then((res) => (res.ok ? res.json() : null))
       .then(
         (
@@ -147,6 +157,10 @@ export default function App() {
   const handleResumeFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (BACKEND_MISSING) {
+      setResumeError(BACKEND_MISSING_MSG);
+      return;
+    }
 
     setResumeError('');
     setResumeNotice('');
@@ -161,7 +175,7 @@ export default function App() {
       });
 
       const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      const response = await fetch('/api/resume', {
+      const response = await fetch(apiUrl('/api/resume'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -198,6 +212,10 @@ export default function App() {
 
   const handleSaveResumeText = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (BACKEND_MISSING) {
+      setResumeError(BACKEND_MISSING_MSG);
+      return;
+    }
     if (!resumeDraft.trim()) {
       setResumeError('Please upload a file or paste your resume text.');
       return;
@@ -208,7 +226,7 @@ export default function App() {
     setIsSavingResume(true);
 
     try {
-      const response = await fetch('/api/resume', {
+      const response = await fetch(apiUrl('/api/resume'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -246,7 +264,7 @@ export default function App() {
     setResumeNotice('');
     setIsSavingResume(true);
     try {
-      await fetch('/api/resume', { method: 'DELETE' });
+      await fetch(apiUrl('/api/resume'), { method: 'DELETE' });
       setHasResume(false);
       setResumeFilename('');
       setResumeDraft('');
@@ -273,10 +291,16 @@ export default function App() {
 
     setMessages((prev) => [...prev, userMsg]);
     setPrompt('');
+
+    if (BACKEND_MISSING) {
+      setChatError(BACKEND_MISSING_MSG);
+      return;
+    }
+
     setIsSending(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

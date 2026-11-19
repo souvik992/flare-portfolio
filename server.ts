@@ -66,6 +66,27 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '20mb' }));
 
+  // Allow the static frontend (e.g. GitHub Pages) to call this API from another origin.
+  // Set ALLOWED_ORIGINS to a comma-separated list, e.g. "https://souvik992.github.io".
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use('/api', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.get('/api/resume', async (_req, res) => {
     const stored = await readStoredResume();
     if (!stored) {
